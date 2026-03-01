@@ -3,7 +3,7 @@ import io
 import os
 import types
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import sys
 import tempfile
@@ -47,6 +47,13 @@ class ScriptModule(Protocol):
     def parse_wechat_xlsx(
         self, file_path: str
     ) -> tuple[list[object], list[str], dict[str, int]]: ...
+
+    def insert_transactions(
+        self,
+        rows_data: dict[int, dict[str, str]],
+        txs: list[object],
+        repair_jd_legacy_sign: bool = False,
+    ) -> tuple[int, int, int]: ...
 
     def main(self) -> int: ...
 
@@ -391,8 +398,6 @@ class WechatXlsxKeyErrorTests(unittest.TestCase):
         self.assertTrue(any("SKIP_XLSX_READ_ERROR" in w for w in warnings))
 
 
-
-
 class NumericCellEmissionTests(unittest.TestCase):
     def test_create_worksheet_xml_emits_numeric_cells_without_inlineStr(self):
         """Column D (amount) should emit numeric cells without t=\"inlineStr\" - use <v> directly."""
@@ -414,7 +419,7 @@ class NumericCellEmissionTests(unittest.TestCase):
         if d2 is None:
             return
         # Numeric cells should NOT have t="inlineStr"
-        self.assertIsNone(d2.get("t"), "D2 should NOT have t=\"inlineStr\" for numeric")
+        self.assertIsNone(d2.get("t"), 'D2 should NOT have t="inlineStr" for numeric')
         # Should have <v> element with the numeric value
         v_elem = d2.find("m:v", ns)
         self.assertIsNotNone(v_elem, "D2 should have <v> element for numeric value")
@@ -427,9 +432,93 @@ class NumericCellEmissionTests(unittest.TestCase):
         self.assertIsNotNone(g2, "Cell G2 should exist")
         if g2 is None:
             return
-        self.assertEqual(g2.get("t"), "inlineStr", "G2 should have t=\"inlineStr\"")
+        self.assertEqual(g2.get("t"), "inlineStr", 'G2 should have t="inlineStr"')
         is_elem = g2.find("m:is/m:t", ns)
         self.assertIsNotNone(is_elem, "G2 should have <is>/<t> for inline string")
         if is_elem is None:
             return
         self.assertEqual(is_elem.text, "hello_inline", "G2 text should be hello_inline")
+
+
+class JdCsvSignNormalizationTests(unittest.TestCase):
+    def _write_temp_csv(self, content: str) -> str:
+        fd, path = tempfile.mkstemp(suffix=".csv", text=True)
+        os.close(fd)
+        with open(path, "w", encoding="utf-8-sig", newline="") as f:
+            _ = f.write(content)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        return path
+
+    def test_parse_jd_csv_with_slash_sign_column_normalizes_expense_to_negative(self):
+        # Test the bug case: real-world JD CSV has header '收/支' (not '收支')
+        # and '支出' value in that column should make amount negative
+        content = (
+            "交易时间,金额,收/支,支付方式,交易对方,订单号,交易类型\n"
+            + "2026-02-08,102.20,支出,微信,京东商城,JD123,消费\n"
+        )
+        path = self._write_temp_csv(content)
+
+        txs, warnings, stats = script.parse_jd_csv(path)
+
+        self.assertEqual(len(txs), 1)
+        tx = cast(Any, txs[0])
+        # Expecting this test to fail first - the bug is that amount remains positive
+        self.assertEqual(
+            tx.amount, -102.20, "Amount should be negative for '支出' in '收/支' column"
+        )
+        self.assertEqual(warnings, [])
+        self.assertEqual(list(stats.values()), [1, 0])  # rows_parsed=1, rows_skipped=0
+
+
+class RepairLegacyJdSignTests(unittest.TestCase):
+    def test_insert_transactions_opt_in_repair_updates_legacy_positive_row_in_place(
+        self,
+    ):
+        legacy_tx = script.Tx(
+            date="2026-02-08",
+            amount=102.20,
+            payment_method="微信",
+            platform="jd",
+            merchant="京东商城",
+            order_id="JD123",
+            source_file="jd.csv",
+            source_path="/tmp/jd.csv",
+            source_row="2",
+            extra_fields=[],
+        )
+        legacy_fp = script.tx_fingerprint(legacy_tx)
+        canonical_tx = replace(legacy_tx, amount=-102.20)
+        canonical_fp = script.tx_fingerprint(canonical_tx)
+
+        rows_data = {
+            1: {"A": "日期", "D": "金额", "F": "支付方式", "G": "tx_fingerprint"},
+            2: {
+                "A": "2026-02-08",
+                "D": "102.20",
+                "F": "微信",
+                "G": legacy_fp,
+            },
+        }
+
+        inserted, dup_skipped, repaired = script.insert_transactions(
+            rows_data,
+            [canonical_tx],
+            repair_jd_legacy_sign=True,
+        )
+
+        self.assertEqual(inserted, 0)
+        self.assertEqual(dup_skipped, 0)
+        self.assertEqual(repaired, 1)
+        self.assertEqual(rows_data[2]["D"], "-102.20")
+        self.assertEqual(rows_data[2]["G"], canonical_fp)
+
+        inserted2, dup2, repaired2 = script.insert_transactions(
+            rows_data,
+            [canonical_tx],
+            repair_jd_legacy_sign=True,
+        )
+        self.assertEqual(inserted2, 0)
+        self.assertEqual(dup2, 1)
+        self.assertEqual(repaired2, 0)
+        self.assertEqual(rows_data[2]["D"], "-102.20")
+        self.assertEqual(rows_data[2]["G"], canonical_fp)

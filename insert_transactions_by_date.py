@@ -54,6 +54,7 @@ class CliArgs(Protocol):
     deps_check: bool
     selftest_roundtrip_inline_str: bool
     selftest_dynamic_cols: bool
+    repair_jd_legacy_sign: bool
 
 
 def dep_available(name: str) -> bool:
@@ -213,7 +214,7 @@ def parse_jd_csv(file_path: str) -> tuple[list[Tx], list[str], dict[str, int]]:
             )
             continue
 
-        direction = cell("收支")
+        direction = cell("收/支") or cell("收支")
         if "支出" in direction and amount > 0:
             amount = -amount
         if "收入" in direction and amount < 0:
@@ -906,15 +907,21 @@ def tx_fingerprint(tx: TxLike) -> str:
 
 
 def index_existing_fingerprints(rows_data: dict[int, dict[str, str]]) -> set[str]:
-    found: set[str] = set()
+    return set(index_existing_fingerprint_rows(rows_data).keys())
+
+
+def index_existing_fingerprint_rows(
+    rows_data: dict[int, dict[str, str]],
+) -> dict[str, int]:
+    out: dict[str, int] = {}
     fp_re = re.compile(r"fp:[0-9a-f]{40}")
-    for row in rows_data.values():
+    for row_no, row in rows_data.items():
         g = str(row.get("G", "")).strip()
         if g.startswith("fp:"):
-            found.add(g)
+            _ = out.setdefault(g, row_no)
         for fp in cast(list[str], fp_re.findall(g)):
-            found.add(fp)
-    return found
+            _ = out.setdefault(fp, row_no)
+    return out
 
 
 def build_date_blocks(
@@ -986,12 +993,16 @@ def find_insert_position_for_new_date(
 
 
 def insert_transactions(
-    rows_data: dict[int, dict[str, str]], txs: list[Tx]
-) -> tuple[int, int]:
+    rows_data: dict[int, dict[str, str]],
+    txs: list[Tx],
+    repair_jd_legacy_sign: bool = False,
+) -> tuple[int, int, int]:
     blocks = build_date_blocks(rows_data)
-    existing_fps = index_existing_fingerprints(rows_data)
+    fp_rows = index_existing_fingerprint_rows(rows_data)
+    existing_fps = set(fp_rows.keys())
     inserted = 0
     dup_skipped = 0
+    repaired = 0
 
     for tx in sorted(
         txs, key=lambda item: (item.date, item.source_file, item.source_row)
@@ -1001,10 +1012,36 @@ def insert_transactions(
             dup_skipped += 1
             continue
 
+        if repair_jd_legacy_sign and tx.platform == "jd" and tx.amount < 0:
+            legacy_tx = Tx(
+                date=tx.date,
+                amount=abs(tx.amount),
+                payment_method=tx.payment_method,
+                platform=tx.platform,
+                merchant=tx.merchant,
+                order_id=tx.order_id,
+                source_file=tx.source_file,
+                source_path=tx.source_path,
+                source_row=tx.source_row,
+                extra_fields=tx.extra_fields,
+            )
+            legacy_fp = tx_fingerprint(legacy_tx)
+            legacy_row = fp_rows.get(legacy_fp)
+            if legacy_row is not None:
+                rows_data.setdefault(legacy_row, {})["D"] = f"{tx.amount:.2f}"
+                rows_data.setdefault(legacy_row, {})["G"] = fp
+                existing_fps.discard(legacy_fp)
+                _ = fp_rows.pop(legacy_fp, None)
+                existing_fps.add(fp)
+                fp_rows[fp] = legacy_row
+                repaired += 1
+                continue
+
         if tx.date in blocks:
             insert_at = blocks[tx.date]["end"] + 1
             insert_blank_row(rows_data, insert_at)
             write_tx_to_row(rows_data, insert_at, tx, fp)
+            written_row_no = insert_at
             for date_key in list(blocks.keys()):
                 if date_key == tx.date:
                     blocks[date_key]["end"] += 1
@@ -1018,6 +1055,7 @@ def insert_transactions(
 
             insert_blank_row(rows_data, date_row + 1)
             write_tx_to_row(rows_data, date_row + 1, tx, fp)
+            written_row_no = date_row + 1
 
             for date_key in list(blocks.keys()):
                 if blocks[date_key]["start"] >= date_row:
@@ -1026,9 +1064,10 @@ def insert_transactions(
             blocks[tx.date] = {"start": date_row, "end": date_row + 1}
 
         existing_fps.add(fp)
+        fp_rows[fp] = written_row_no
         inserted += 1
 
-    return inserted, dup_skipped
+    return inserted, dup_skipped, repaired
 
 
 def discover_source_files(source_dir: str) -> tuple[list[str], list[str], int]:
@@ -1125,6 +1164,9 @@ def setup_cli() -> argparse.Namespace:
     _ = parser.add_argument(
         "--selftest-dynamic-cols", action="store_true", default=False
     )
+    _ = parser.add_argument(
+        "--repair-jd-legacy-sign", action="store_true", default=False
+    )
     return parser.parse_args()
 
 
@@ -1138,6 +1180,7 @@ def main() -> int:
     deps_check = args.deps_check
     selftest_inline = args.selftest_roundtrip_inline_str
     selftest_dynamic = args.selftest_dynamic_cols
+    repair_jd_legacy_sign = getattr(args, "repair_jd_legacy_sign", False)
 
     if selftest_inline:
         return run_selftest_roundtrip_inline_str()
@@ -1188,6 +1231,7 @@ def main() -> int:
         "parsed": 0,
         "inserted": 0,
         "dup_skipped": 0,
+        "repaired": 0,
         "skipped": 0,
         "warnings": 0,
     }
@@ -1197,13 +1241,18 @@ def main() -> int:
         parser_id, txs, warnings, stats = parser_dispatch(file_path, has_pdf, has_xlrd)
         parsed = int(stats.get("rows_parsed", 0))
         skipped = int(stats.get("rows_skipped", 0))
-        inserted, dup_skipped = insert_transactions(rows_data, txs)
+        inserted, dup_skipped, repaired = insert_transactions(
+            rows_data,
+            txs,
+            repair_jd_legacy_sign=repair_jd_legacy_sign,
+        )
         warn_count = len(warnings)
 
         totals["files"] += 1
         totals["parsed"] += parsed
         totals["inserted"] += inserted
         totals["dup_skipped"] += dup_skipped
+        totals["repaired"] += repaired
         totals["skipped"] += skipped
         totals["warnings"] += warn_count
         all_warnings.extend(warnings)
@@ -1215,6 +1264,8 @@ def main() -> int:
             f"skipped={skipped} warnings={warn_count}"
         )
         print(result_line)
+        if repair_jd_legacy_sign:
+            print(f"REPAIR_FILE:{os.path.basename(file_path)} repaired={repaired}")
 
     total_line = (
         f"TOTAL: files={totals['files']} parsed={totals['parsed']} "
@@ -1222,6 +1273,8 @@ def main() -> int:
         f"skipped={totals['skipped']} warnings={totals['warnings']}"
     )
     print(total_line)
+    if repair_jd_legacy_sign:
+        print(f"REPAIRED_TOTAL:{totals['repaired']}")
 
     unique_sorted_warnings = sorted(set(all_warnings))
     for warning in unique_sorted_warnings[:50]:
