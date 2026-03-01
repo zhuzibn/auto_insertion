@@ -5,10 +5,11 @@ Python CLI tool that parses transaction data from multiple platform exports (JD,
 ## Features
 
 - **Multi-format support**: Parses exports from JD, WeChat, Alipay, XLS, and PDF files
-- **Date-based grouping**: Automatically organizes transactions by date in Excel worksheets
+- **Date-based grouping**: Automatically organizes transactions by date in Excel worksheets  
 - **Idempotent inserts**: Uses SHA-1 fingerprinting to avoid duplicate entries
 - **Flexible column mapping**: Supports dynamic columns beyond Excel's column Z limit
 - **Robust parsing**: Handles various date formats and numeric conventions
+- **Legacy repair**: Fix previously inserted positive expense amounts with `--repair-jd-legacy-sign`
 
 ## Installation
 
@@ -43,6 +44,9 @@ python3 insert_transactions_by_date.py --dry-run
 
 # Check dependencies
 python3 insert_transactions_by_date.py --deps-check
+
+# Repair legacy JD expense sign issues
+python3 insert_transactions_by_date.py --repair-jd-legacy-sign
 ```
 
 ### CLI Arguments
@@ -55,6 +59,9 @@ python3 insert_transactions_by_date.py --deps-check
 | `--in-place` | `True` | Overwrite workbook with backup |
 | `--dry-run` | `False` | Parse only, no write operations |
 | `--deps-check` | - | Check optional dependency availability |
+| `--repair-jd-legacy-sign` | `False` | Fix legacy positive JD expense entries |
+| `--selftest-roundtrip-inline-str` | - | Run inline string roundtrip self-test |
+| `--selftest-dynamic-cols` | - | Run dynamic column handling self-test |
 
 ## Testing
 
@@ -96,10 +103,10 @@ python3 insert_transactions_by_date.py --selftest-dynamic-cols
 
 ## Supported Platforms
 
-- **JD (京东)**: CSV exports with transaction data
+- **JD (京东)**: CSV exports with transaction data (supports both `收支` and `收/支` headers)
 - **WeChat (微信)**: Transaction records
-- **Alipay (支付宝)**: Payment history exports
-- **XLS**: Legacy Excel format (requires xlrd)
+- **Alipay (支付宝)**: Payment history exports  
+- **XLS**: Legacy Excel format (requires xlrd==1.2.0)
 - **PDF**: Text-based transaction records (requires pdfplumber)
 
 ## How It Works
@@ -116,10 +123,10 @@ python3 insert_transactions_by_date.py --selftest-dynamic-cols
 | Column | Content |
 |--------|---------|
 | A | 日期 (Date) |
-| D | 金额 (Amount) |
+| D | 金额 (Amount) - stored as numeric value |
 | F | 支付方式 (Payment Method) |
 | G | tx_fingerprint (SHA-1 hash) |
-| H+ | Extra fields (dynamic) |
+| H+ | Extra fields (dynamic platform-specific data) |
 
 ## Transaction Format
 
@@ -128,31 +135,16 @@ Each transaction contains:
 - `amount`: Formatted with 2 decimals (expenses negative, income positive)
 - `payment_method`: Payment channel
 - `merchant`: Business name (if available)
-- `order_id`: Transaction identifier (if available)
+- `order_id`: Transaction identifier (if available)  
 - `source_file`: Original filename
 - `source_row`: Row number in source file
 - `extra_fields`: Additional platform-specific data
 
-## Development
+## Optional Dependencies
 
-### Code Style
+Install via: `pip install -r requirements.txt`
 
-- Python 3.x with type hints
-- Snake_case for functions and variables
-- PascalCase for classes
-- UPPER_SNAKE_CASE for constants
-- Docstrings with metadata tags (e.g., `#QB|`, `#YW|`)
+- **`pdfplumber`**: Required for PDF text extraction and transaction parsing
+- **`xlrd==1.2.0`**: Required for legacy .xls file support (specific version for compatibility)
 
-### Error Handling
-
-- Non-fatal parse errors return empty results with warnings
-- Exit code: 0 on success, 1 on error
-- Optional dependencies handled gracefully
-
-## License
-
-[Add your license here]
-
-## Contributing
-
-[Add contribution guidelines here]
+Core functionality works without these dependencies - they're only needed for PDF and legacy XLS file support.

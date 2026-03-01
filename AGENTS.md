@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-02-27
-**Repo Status:** Not a git repository
+**Generated:** 2026-03-01
+**Repo Status:** Git repository with active development
 
 ## OVERVIEW
 Python CLI tool that parses transaction data from multiple platform exports (JD, WeChat, Alipay, XLS, PDF) and inserts them into Excel worksheets grouped by date.
@@ -9,18 +9,21 @@ Python CLI tool that parses transaction data from multiple platform exports (JD,
 ## STRUCTURE
 ```
 ./
-├── insert_transactions_by_date.py    # Main CLI script (1245 lines)
+├── insert_transactions_by_date.py    # Main CLI script (1300+ lines)
 ├── requirements.txt                 # Optional dependencies (pdfplumber, xlrd)
-└── tests/
-    ├── __init__.py
-    └── test_helpers.py              # Unit tests for helper functions
+├── tests/
+│   ├── __init__.py
+│   └── test_helpers.py              # Unit tests for helper functions
+├── README.md                        # Project documentation
+├── usage.md                         # Usage examples and guide
+└── AGENTS.md                        # This knowledge base file
 ```
 
 ## BUILD/LINT/TEST COMMANDS
 
 ### Running Tests
 ```bash
-# Run all tests
+# Run all tests with verbose output
 python3 -m unittest -v
 
 # Run specific test file
@@ -31,84 +34,128 @@ python3 -m unittest tests.test_helpers.ColumnLetterIndexTests -v
 
 # Run specific test method
 python3 -m unittest tests.test_helpers.ColumnLetterIndexTests.test_col_index_to_letter_boundaries -v
+
+# Run all tests matching pattern
+python3 -m unittest discover -p "test_*.py" -v
+
+# Run tests with coverage (if coverage installed)
+python3 -m coverage run -m unittest discover -s tests -p "test_*.py"
+python3 -m coverage report
 ```
 
 ### Dependency Check
 ```bash
+# Check optional dependency availability
 python3 insert_transactions_by_date.py --deps-check
 ```
 
 ### Self-Tests
 ```bash
+# Test inline string roundtrip functionality
 python3 insert_transactions_by_date.py --selftest-roundtrip-inline-str
+
+# Test dynamic column handling beyond Z
 python3 insert_transactions_by_date.py --selftest-dynamic-cols
+```
+
+### Linting and Formatting
+```bash
+# No explicit formatter configured - follow standard Python conventions
+# Ensure shebang is present: #!/usr/bin/env python3
+
+# Type checking (if mypy available)
+mypy insert_transactions_by_date.py tests/
+
+# Ruff linting (if ruff available - cache in .ruff_cache/)
+ruff check .
+ruff format .
 ```
 
 ## CODE STYLE GUIDELINES
 
 ### Imports
-- Order: stdlib, third-party, local
-- stdlib: argparse, csv, datetime, hashlib, importlib, os, re, shutil, sys, zipfile, xml.etree.ElementTree
-- third-party: dataclasses, pathlib, typing, types, tempfile
-- Type-only imports use `from typing import Protocol, cast`
+- **Order**: stdlib, third-party, local
+- **stdlib**: argparse, csv, datetime, hashlib, importlib, os, re, shutil, sys, zipfile, xml.etree.ElementTree
+- **third-party**: dataclasses, pathlib, typing, types, tempfile
+- **Type-only imports**: Use `from typing import Protocol, cast`
+- **Import grouping**: Separate groups with single blank line
 
 ### Naming Conventions
 - **Functions**: `snake_case` (e.g., `normalize_date`, `parse_jd_csv`, `tx_fingerprint`)
-- **Classes**: `PascalCase` (e.g., `Tx`, `TxLike`, `CliArgs`)
-- **Constants**: `UPPER_SNAKE_CASE` (e.g., `NS_MAIN`, `NS_DOC_REL`)
-- **Variables**: `snake_case` (e.g., `rows_data`, `max_row`, `txs`)
+- **Classes**: `PascalCase` (e.g., `Tx`, `TxLike`, `CliArgs`, `ScriptModule`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `NS_MAIN`, `NS_DOC_REL`, `NS_PKG_REL`)
+- **Variables**: `snake_case` (e.g., `rows_data`, `max_row`, `txs`, `source_path`)
+- **Test methods**: `test_<functionality>_<scenario>` pattern
 
 ### Type Hints
-- Required for all function signatures
-- Use modern union syntax: `str | None`, `list[str]`, `dict[str, int]`
-- Use `Protocol` for type contracts (`TxLike`, `CliArgs`, `ScriptModule`)
-- Use `cast()` when type inference needs help
-- Use `@dataclass` for structured data (`Tx` class)
+- **Required**: All function signatures must have type hints
+- **Modern syntax**: Use `str | None`, `list[str]`, `dict[str, int]` instead of Union
+- **Protocols**: Use for type contracts (`TxLike`, `CliArgs`, `ScriptModule`)
+- **Dataclasses**: Use `@dataclass` for structured data (`Tx` class)
+- **Cast usage**: Use `cast()` when type inference needs help
+- **Generic types**: Prefer modern collection types over typing module equivalents
 
 ### Error Handling
-- Broad exception catching uses `except Exception: # noqa: BLE001`
-- Check for optional deps with `importlib.util.find_spec()`
-- Return empty results + warning for non-fatal parse failures
-- Exit code: 0 on success, 1 on error
+- **Broad exceptions**: Use `except Exception: # noqa: BLE001` with specific noqa comment
+- **Optional dependencies**: Check with `importlib.util.find_spec()`
+- **Non-fatal parsing**: Return empty results + warning list for parse failures
+- **Exit codes**: 0 on success, 1 on error
+- **Validation errors**: Raise ValueError with descriptive messages
+- **File operations**: Handle FileNotFoundError, PermissionError appropriately
 
 ### Comment Style
-- Metadata-driven with pipe-delimited tags: `#QB|`, `#YW|`, `#HX|` (2-letter hash prefix)
-- Format: `#TAG|<comment>`
-- Tags appear to be generated by tooling; preserve this style
+- **Metadata-driven**: Use pipe-delimited tags: `#QB|`, `#YW|`, `#HX|` (2-letter hash prefix)
+- **Format**: `#TAG|<comment>` where TAG is exactly 2 uppercase letters + pipe
+- **Tool-generated**: Tags appear to be generated by external tooling; preserve this style
+- **Docstrings**: Include in all public functions and classes
+- **Inline comments**: Explain why, not what (when non-obvious)
 
 ### Formatting
-- Standard Python conventions (no explicit formatter configured)
-- Shebang required: `#!/usr/bin/env python3`
+- **Standard Python**: Follow PEP 8 conventions
+- **Shebang required**: `#!/usr/bin/env python3` at top of executable scripts
+- **Line length**: No strict limit, but prefer readability
+- **Indentation**: 4 spaces, no tabs
+- **Blank lines**: Use to separate logical sections and functions
+- **Trailing commas**: Use in multiline lists/tuples for cleaner diffs
 
 ## KEY PATTERNS
 
 ### Date Handling
-- Normalize all dates to `YYYY-MM-DD` via `normalize_date()`
-- Supports multiple input formats: `%Y-%m-%d`, `%Y%m%d`, Chinese date patterns
-- Time is stripped; only date portion retained
+- **Normalization**: All dates normalized to `YYYY-MM-DD` via `normalize_date()`
+- **Input formats**: Supports `%Y-%m-%d`, `%Y%m%d`, Chinese date patterns (年月日)
+- **Time stripping**: Only date portion retained, time information discarded
+- **Empty handling**: Returns None for empty/None input
 
 ### Amount Handling
-- Expenses = negative, Income = positive (when direction available)
-- Parse with `parse_amount()` helper (handles commas, signs)
-- Store as formatted string with 2 decimals: `f"{tx.amount:.2f}"`
+- **Sign convention**: Expenses = negative, Income = positive (when direction available)
+- **Parsing**: Use `parse_amount()` helper (handles commas, currency symbols, signs)
+- **Storage**: Formatted as string with 2 decimals: `f"{tx.amount:.2f}"`
+- **Validation**: Returns None for invalid/empty amounts
 
 ### Excel Operations
-- Direct `zipfile` + `xml.etree.ElementTree` (no openpyxl/xlwt)
-- Inline strings (`t="inlineStr"`) for cell values
-- Dynamic columns beyond Z: use `col_index_to_letter()` / `col_letter_to_index()`
-- Column mapping: A=日期, D=金额, F=支付方式, G=tx_fingerprint, H+=extra_fields
+- **Direct manipulation**: Uses `zipfile` + `xml.etree.ElementTree` (no openpyxl/xlwt)
+- **Cell types**: Inline strings (`t="inlineStr"`) for text, numeric cells without type attribute
+- **Dynamic columns**: Beyond column Z using `col_index_to_letter()` / `col_letter_to_index()`
+- **Column mapping**: 
+  - A = 日期 (Date)
+  - D = 金额 (Amount) - numeric format
+  - F = 支付方式 (Payment Method)
+  - G = tx_fingerprint (SHA-1 hash)
+  - H+ = extra_fields (dynamic platform-specific data)
 
 ### Idempotency
-- Compute `tx_fingerprint` = "fp:" + sha1(platform|date|amount|payment_method|merchant|order_id|source_file|source_row)
-- Store fingerprint in column G
-- Skip insertion if fingerprint already exists in sheet
+- **Fingerprint computation**: `"fp:" + sha1(platform|date|amount|payment_method|merchant|order_id|source_file|source_row)`
+- **Storage location**: Column G contains transaction fingerprints
+- **Duplicate detection**: Skip insertion if fingerprint already exists in sheet
+- **Repair capability**: Can fix legacy positive expense entries with `--repair-jd-legacy-sign`
 
 ## PARSER ARCHITECTURE
 
 ### Dispatch Pattern
-- `parser_dispatch(file_path, has_pdf, has_xlrd)` returns `(parser_id, txs, warnings, stats)`
-- CSV files are sniffed via `classify_csv()` for JD vs Alipay schemas
-- Unknown schemas return empty list with `SKIP_*` warning
+- **Main dispatcher**: `parser_dispatch(file_path, has_pdf, has_xlrd)` returns `(parser_id, txs, warnings, stats)`
+- **CSV classification**: Files sniffed via `classify_csv()` for JD vs Alipay schemas based on header signatures
+- **Unknown formats**: Return empty list with `SKIP_*` warning
+- **Optional dependencies**: PDF parsing requires pdfplumber, XLS requires xlrd==1.2.0
 
 ### Parser Return Signature
 ```python
@@ -116,22 +163,100 @@ def parse_*_file(file_path: str) -> tuple[list[Tx], list[str], dict[str, int]]:
     # Returns: (transactions, warnings, {rows_parsed: n, rows_skipped: n})
 ```
 
+### Supported Platforms
+- **JD (京东)**: CSV exports with various header variations (收支 vs 收/支)
+- **WeChat (微信)**: XLSX format with sheet1.xml structure
+- **Alipay (支付宝)**: CSV exports with Chinese headers
+- **Legacy XLS**: Requires xlrd==1.2.0 for .xls file support
+- **PDF**: Text-based transaction records requiring pdfplumber
+
 ## ANTI-PATTERNS
-- No forbidden phrases (DO NOT/NEVER/ALWAYS/DEPRECATED) in codebase
-- No type suppression (`as any`, `@ts-ignore` equivalent)
-- No external dependencies required for core functionality (pdfplumber/xlrd are optional)
+- **No forbidden phrases**: Avoid DO NOT/NEVER/ALWAYS/DEPRECATED in codebase comments
+- **No type suppression**: Never use equivalent of `as any`, `@ts-ignore` in Python
+- **No unnecessary dependencies**: Core functionality works without optional deps (pdfplumber/xlrd)
+- **No broad exception swallowing**: Always include specific noqa comments when catching Exception
+- **No hardcoded paths**: Use Path objects and relative paths where possible
+- **No mutable defaults**: Avoid mutable default arguments in function definitions
 
 ## OPTIONAL DEPENDENCIES
 Install via: `pip install -r requirements.txt`
-- `pdfplumber`: PDF text extraction
-- `xlrd==1.2.0`: Legacy .xls file support
+- **`pdfplumber`**: Required for PDF text extraction and transaction parsing
+- **`xlrd==1.2.0`**: Required for legacy .xls file support (specific version for compatibility)
 
 ## CLI ARGUMENTS
 ```bash
 --source-dir    Default: /mnt/r/money_record/auto_insertion_source_files
---workbook      Default: /mnt/r/money_record/money_2026.xlsx
+--workbook      Default: /mnt/r/money_record/money_2026.xlsx  
 --sheet         Default: 2026每日饮食表
 --in-place      Default: True (overwrite with backup)
---dry-run       Default: False (parse only, no write)
+--dry-run       Default: False (parse only, no write operations)
 --deps-check    Check optional dependency availability
+--repair-jd-legacy-sign  Default: False (fix legacy positive expense entries)
+--selftest-roundtrip-inline-str  Run inline string roundtrip self-test
+--selftest-dynamic-cols  Run dynamic column handling self-test
 ```
+
+## TESTING CONVENTIONS
+- **Test structure**: Mirror src structure in tests/ directory
+- **Mocking**: Use unittest.mock.patch for external dependencies
+- **Test data**: Create temporary files with proper cleanup
+- **Edge cases**: Test boundary conditions (column Z/Z+1, date formats, amount parsing)
+- **Integration**: Self-tests verify end-to-end functionality
+- **Output verification**: Capture stdout to verify logging and reporting
+
+# Project Guidelines & Documentation
+
+All contributors (including AI Agents) must follow these protocols. All logs are maintained within this file under the relevant sections.
+
+---
+
+## Section 1: Source Code Changes (Changelog)
+
+Every non-trivial modification must be appended to the bottom of this section using this template:
+
+### [vX.X.X] | YYYY-MM-DD
+
+- **Type:** (feat | fix | refactor | docs)
+- **Description:** One-sentence summary.
+- **Motivation:** Why was this change necessary?
+- **Files Modified:** `path/to/file`
+- **Test Strategy:** How was this verified?
+
+### v1.1.0 | 2026-03-01
+
+- **Type:** fix
+- **Description:** JD CSV expense sign parsing for `收/支` header variant.
+- **Motivation:** JD export header uses `收/支` while parser only read `收支`, causing expense amounts to be inserted as positive instead of negative.
+- **Files Modified:** `insert_transactions_by_date.py` (direction header fallback + `--repair-jd-legacy-sign` flag), `tests/test_helpers.py` (regression tests for both header variants).
+- **Test Strategy:** Added `JdCsvSignNormalizationTests` to verify `收/支` header with `支出` yields negative amount; added `RepairLegacyJdSignTests` to verify opt-in repair updates legacy-positive JD expenses to negative in place.
+
+---
+
+## Section 2: Error & Solution Log
+
+Every unique error encountered during development or deployment must be recorded here:
+
+### [ERROR-ID] | Short Descriptive Title
+
+- **Context:** Where/when did it happen?
+- **Symptoms:** Error message or stack trace.
+- **Root Cause:** Detailed explanation of the failure.
+- **Resolution:** Step-by-step fix implemented.
+- **Prevention:** How to avoid this in the future.
+
+### JD-CSV-SIGN-001 | JD Expense Sign Misparsing
+
+- **Context:** Parsing JD CSV exports during transaction import on 2026-03-01.
+- **Symptoms:** Expenses with header `收/支` and value `支出` were inserted as positive amounts instead of negative.
+- **Root Cause:** Direction header fallback missing - parser only recognized `收支`, not `收/支` variant used by JD exports.
+- **Resolution:** Added fallback in `parse_jd_csv_file()`: `direction = cell('收/支') or cell('收支')`; implemented `--repair-jd-legacy-sign` flag to repair legacy-positive JD expenses in place.
+- **Prevention:** Keep regression tests for both header variants (`收/支` and `收支`); recommend using `--repair-jd-legacy-sign` to avoid duplicates for legacy-inserted rows.
+
+---
+
+## Section 3: Workflow for Agents
+
+1. **Analyze** the task or error.
+2. **Execute** code changes.
+3. **Verify** with tests.
+4. **Append** documentation to Section 1 (for changes) or Section 2 (for errors) of **this file** before finalizing.
