@@ -856,7 +856,6 @@ def create_worksheet_xml(rows_data: dict[int, dict[str, str]]) -> bytes:
 
     max_col = col_index_to_letter(max_col_idx)
     _ = ET.SubElement(root, "dimension", ref=f"A1:{max_col}{max_row}")
-
     cols = ET.SubElement(root, "cols")
     for i in range(1, 7):
         _ = ET.SubElement(
@@ -872,15 +871,21 @@ def create_worksheet_xml(rows_data: dict[int, dict[str, str]]) -> bytes:
             customWidth="1",
         )
 
+    num_re = re.compile(r"^-?\d+(?:\.\d+)?$")
     sheet_data = ET.SubElement(root, "sheetData")
     for row_no in sorted(rows_data):
         row_el = ET.SubElement(sheet_data, "row", r=str(row_no))
         for _, col in sorted((col_letter_to_index(c), c) for c in rows_data[row_no]):
-            cell = ET.SubElement(row_el, "c", r=f"{col}{row_no}", t="inlineStr")
-            is_el = ET.SubElement(cell, "is")
-            t_el = ET.SubElement(is_el, "t")
-            t_el.text = str(rows_data[row_no][col])
-
+            raw = str(rows_data[row_no][col])
+            if col == "D" and num_re.fullmatch(raw):
+                cell = ET.SubElement(row_el, "c", r=f"{col}{row_no}")
+                v_el = ET.SubElement(cell, "v")
+                v_el.text = raw
+            else:
+                cell = ET.SubElement(row_el, "c", r=f"{col}{row_no}", t="inlineStr")
+                is_el = ET.SubElement(cell, "is")
+                t_el = ET.SubElement(is_el, "t")
+                t_el.text = raw
     return cast(bytes, ET.tostring(root, encoding="utf-8", xml_declaration=True))
 
 

@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 class ScriptModule(Protocol):
     Tx: Any
     argparse: Any
+    NS_MAIN: str
+
+    def create_worksheet_xml(self, rows_data: dict[int, dict[str, str]]) -> bytes: ...
 
     def classify_csv(self, file_path: str) -> str: ...
 
@@ -386,3 +389,47 @@ class WechatXlsxKeyErrorTests(unittest.TestCase):
         self.assertEqual(txs, [])
         self.assertEqual(stats["rows_parsed"], 0)
         self.assertTrue(any("SKIP_XLSX_READ_ERROR" in w for w in warnings))
+
+
+
+
+class NumericCellEmissionTests(unittest.TestCase):
+    def test_create_worksheet_xml_emits_numeric_cells_without_inlineStr(self):
+        """Column D (amount) should emit numeric cells without t=\"inlineStr\" - use <v> directly."""
+        import xml.etree.ElementTree as ET
+
+        rows_data = {
+            1: {"A": "日期", "D": "金额", "F": "支付方式", "G": "指纹"},
+            2: {"A": "2026-02-07", "D": "-12.30", "F": "微信", "G": "hello_inline"},
+        }
+
+        xml_bytes = script.create_worksheet_xml(rows_data)
+        root = ET.fromstring(xml_bytes)
+
+        ns = {"m": script.NS_MAIN}
+
+        # D2 should be numeric without t="inlineStr"
+        d2 = root.find(".//m:c[@r='D2']", ns)
+        self.assertIsNotNone(d2, "Cell D2 should exist")
+        if d2 is None:
+            return
+        # Numeric cells should NOT have t="inlineStr"
+        self.assertIsNone(d2.get("t"), "D2 should NOT have t=\"inlineStr\" for numeric")
+        # Should have <v> element with the numeric value
+        v_elem = d2.find("m:v", ns)
+        self.assertIsNotNone(v_elem, "D2 should have <v> element for numeric value")
+        if v_elem is None:
+            return
+        self.assertEqual(v_elem.text, "-12.30", "D2 value should be -12.30")
+
+        # G2 should remain inlineStr (text cell)
+        g2 = root.find(".//m:c[@r='G2']", ns)
+        self.assertIsNotNone(g2, "Cell G2 should exist")
+        if g2 is None:
+            return
+        self.assertEqual(g2.get("t"), "inlineStr", "G2 should have t=\"inlineStr\"")
+        is_elem = g2.find("m:is/m:t", ns)
+        self.assertIsNotNone(is_elem, "G2 should have <is>/<t> for inline string")
+        if is_elem is None:
+            return
+        self.assertEqual(is_elem.text, "hello_inline", "G2 text should be hello_inline")
